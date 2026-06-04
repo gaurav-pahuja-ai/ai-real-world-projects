@@ -12,7 +12,7 @@ Each project is self-contained, well-documented, and production-oriented — not
 ai-real-world-projects/
 │
 ├── rag/
-│   ├── document-qa-bot/          # PDF Q&A with ChromaDB + OpenAI
+│   ├── document-qa-bot/          # PDF Q&A with ChromaDB + Gemini
 │   └── enterprise-search/        # Multi-tenant RAG with access control
 │
 ├── mcp/
@@ -32,7 +32,7 @@ ai-real-world-projects/
 
 #### `rag/document-qa-bot`
 A production-ready document Q&A system.
-- **Stack:** Python · ChromaDB · OpenAI · Gradio · Docker
+- **Stack:** Python · ChromaDB · Google Gemini · Gradio
 - **Concepts:** Semantic chunking, hybrid BM25+vector search, source citation, streaming
 - **Difficulty:** Intermediate
 
@@ -92,7 +92,8 @@ python main.py
 ## Prerequisites
 
 - Python 3.11+
-- An OpenAI API key (most projects)
+- A Google API key for `document-qa-bot` (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
+- An OpenAI API key (for other projects)
 - Docker (optional, for containerised projects)
 
 ## Contributing

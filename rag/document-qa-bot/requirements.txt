@@ -1,4 +1,4 @@
-openai>=1.30.0
+google-genai>=1.0.0
 chromadb>=0.5.0
 pypdf>=4.2.0
 gradio>=4.36.0

@@ -1,0 +1,19 @@
+# Environment variables
+.env
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ChromaDB local data
+chroma_db/
+
+# OS
+.DS_Store
+Thumbs.db
