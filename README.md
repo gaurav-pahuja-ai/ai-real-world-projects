@@ -63,10 +63,14 @@ Upload a PDF and ask questions about it using semantic search. The app understan
 
 #### `rag/enterprise-search`
 
-Multi-tenant knowledge base search where different users see different documents based on their access level.
+Ask questions about company documents with multi-tenant access control and hybrid search. Different users see different documents. The retrieval pipeline combines BM25 keyword search, dense vector search, and Reciprocal Rank Fusion — the same steps Azure AI Search, Elasticsearch, and Weaviate run internally.
 
-- **Stack:** Python, Qdrant, FastAPI, LangChain, OAuth2
-- **Key concepts:** Multi-source ingestion, per-user access-aware retrieval, Cohere re-ranking
+Five sample ACME Corp documents are pre-loaded at startup. Switch between users (alice, bob, charlie, admin) and ask the same question to see how access control changes the answer and the sources.
+
+- **Stack:** Python, rank-bm25, Qdrant, Google text-embedding-004, Gemini Flash, Gradio
+- **Key concepts:** Hybrid retrieval, Reciprocal Rank Fusion, per-document access control, multi-tenancy
+- **What you learn:** What Azure AI Search is actually doing internally when you enable hybrid search, and why combining BM25 and vector search beats either one alone
+- **API keys needed:** Google Gemini (free tier, covers both embeddings and generation)
 - **Difficulty:** Advanced
 
 ---
