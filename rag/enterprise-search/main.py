@@ -289,9 +289,14 @@ def vector_retrieve(query: str, tenant_id: str, user_id: str) -> list[str]:
             must=[FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))]
         ),
     )
+    # Log scores to console
+    print(f"\n--- [Vector Search] Query: '{query}' ---")
+    for r in response.points:
+        print(f"  - Document: '{r.payload.get('source')}' | Similarity Score: {r.score:.4f}")
+
     accessible = [
         r for r in response.points
-        if not r.payload.get("allowed_users") or user_id in r.payload["allowed_users"]
+        if r.score >= 0.50 and (not r.payload.get("allowed_users") or user_id in r.payload["allowed_users"])
     ]
     return [r.payload["chunk_id"] for r in accessible[:VECTOR_POOL]]
 
@@ -342,7 +347,7 @@ def hybrid_search(query: str, tenant_id: str, user_id: str):
 def respond(message: str, history: list, tenant_id: str, user_id: str):
     """Stream an answer from Gemini Flash using hybrid-retrieved context."""
     if not message.strip():
-        yield "", history
+        yield "", history, ""
         return
 
     # 1. Immediately append the user message to history and yield
@@ -351,11 +356,11 @@ def respond(message: str, history: list, tenant_id: str, user_id: str):
         {"role": "user",      "content": message},
         {"role": "assistant", "content": "Thinking..."},
     ]
-    yield "", history
+    yield "", history, "🔍 *Searching database...*"
 
     if not chunk_store:
         history[-1]["content"] = "No documents indexed yet. Upload a PDF to get started."
-        yield "", history
+        yield "", history, "⚠️ No documents indexed yet."
         return
 
     # 2. Run retrieval inside a try-except block
@@ -363,15 +368,15 @@ def respond(message: str, history: list, tenant_id: str, user_id: str):
         chunks, debug = hybrid_search(message, tenant_id, user_id)
     except Exception as e:
         history[-1]["content"] = f"Retrieval Error: {str(e)}"
-        yield "", history
+        yield "", history, f"❌ Retrieval Error: {str(e)}"
         return
 
     if not chunks:
         history[-1]["content"] = (
             f"No documents found that **{user_id}** has access to for this query.\n\n"
-            f"Try switching to **admin** or uploading a document with access for {user_id}."
+            f"Try switching user roles or uploading a new document."
         )
-        yield "", history
+        yield "", history, "⚠️ No matching chunks found."
         return
 
     context = "\n\n---\n\n".join(f"[Source: {c.source}]\n{c.text}" for c in chunks)
@@ -385,14 +390,16 @@ def respond(message: str, history: list, tenant_id: str, user_id: str):
     )
 
     debug_md = (
-        f"\n\n---\n"
-        f"**Retrieval breakdown:**\n"
-        f"- BM25 (keyword) matched **{debug['bm25_hits']}** chunks "
-        f"from: {', '.join(debug['bm25_sources']) or 'none'}\n"
-        f"- Vector (semantic) matched **{debug['vector_hits']}** chunks "
-        f"from: {', '.join(debug['vec_sources']) or 'none'}\n"
-        f"- RRF merged both lists. Top **{FINAL_TOP_K}** used for this answer.\n"
-        f"- **Sources cited:** {', '.join(set(debug['final']))}"
+        f"### 🔍 Retrieval Insights & Metrics\n\n"
+        f"📊 **BM25 (Keyword Index)**\n"
+        f"- Matches: **{debug['bm25_hits']}** chunks\n"
+        f"- Sources matched: `{', '.join(debug['bm25_sources']) or 'None'}`\n\n"
+        f"🧠 **Vector (Semantic Index)**\n"
+        f"- Matches: **{debug['vector_hits']}** chunks\n"
+        f"- Sources matched: `{', '.join(debug['vec_sources']) or 'None'}`\n\n"
+        f"🔀 **Reciprocal Rank Fusion (RRF)**\n"
+        f"- Merged candidates: `{', '.join(set(debug['final'])) or 'None'}`\n"
+        f"- Top **{FINAL_TOP_K}** highest-ranked chunks sent as LLM context."
     )
 
     # 3. Stream from model
@@ -400,7 +407,7 @@ def respond(message: str, history: list, tenant_id: str, user_id: str):
     if PROVIDER in ("openai", "openrouter"):
         if not openai_client:
             history[-1]["content"] = f"Error: Provider '{PROVIDER}' selected, but client is not initialized. Please verify your API keys."
-            yield "", history
+            yield "", history, "❌ Configuration Error"
             return
 
         try:
@@ -417,10 +424,10 @@ def respond(message: str, history: list, tenant_id: str, user_id: str):
                 if delta:
                     full += delta
                     history[-1]["content"] = full
-                    yield "", history
+                    yield "", history, debug_md
         except Exception as e:
             history[-1]["content"] = f"API Error ({PROVIDER}): {str(e)}"
-            yield "", history
+            yield "", history, f"❌ API Error ({PROVIDER})"
             return
     else:
         # Default Gemini flow
@@ -430,14 +437,14 @@ def respond(message: str, history: list, tenant_id: str, user_id: str):
             for part in response:
                 full += part.text
                 history[-1]["content"] = full
-                yield "", history
+                yield "", history, debug_md
         except Exception as e:
             history[-1]["content"] = f"API Error (gemini): {str(e)}"
-            yield "", history
+            yield "", history, f"❌ API Error (gemini)"
             return
 
-    history[-1]["content"] = full + debug_md
-    yield "", history
+    history[-1]["content"] = full
+    yield "", history, debug_md
 
 
 def ocr_pdf_with_gemini(file_path: str) -> str:
@@ -512,12 +519,12 @@ body, .gradio-container {
 .header-container {
     background: white;
     border-radius: 14px;
-    padding: 20px 28px;
-    margin-bottom: 12px;
+    padding: 8px 16px;
+    margin-bottom: 6px;
     border: 1px solid #e2e8f0;
     box-shadow: 0 1px 6px rgba(0,0,0,.06);
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 12px;
@@ -652,89 +659,114 @@ with gr.Blocks(title="Smart File Cabinet") as demo:
 
     with gr.Row(equal_height=False):
 
-        # LEFT PANEL
+        # LEFT PANEL (Vault & Uploads)
         with gr.Column(scale=1, min_width=290, elem_classes=["panel-block"]):
+            with gr.Tabs():
+                with gr.Tab("📁 Vault Corpus"):
+                    gr.HTML('<p class="panel-label">Active Corpus</p>')
+                    stats_box = gr.Textbox(
+                        value=corpus_stats(TENANT),
+                        label="", interactive=False, lines=4,
+                    )
+                    with gr.Row(variant="compact"):
+                        with gr.Column(scale=3):
+                            gr.HTML("""
+                            <div style="font-size: 11px; line-height: 1.3; color: #475569; padding-top: 2px;">
+                                💡 These 3 documents are pre-loaded in your cabinet. Download their physical PDFs below to inspect.
+                            </div>
+                            """)
+                        with gr.Column(scale=1, min_width=75):
+                            refresh_btn = gr.Button("Refresh", size="sm")
+                    
+                    gr.HTML('<p class="panel-label" style="margin-top: 10px !important;">Download Sample PDFs</p>')
+                    gr.File(
+                        value=[
+                            "sample_files/My_Personal_Journal.pdf",
+                            "sample_files/Biology_Group_Project.pdf",
+                            "sample_files/Alice_in_Wonderland_Summary.pdf"
+                        ],
+                        label="Local Sample PDFs",
+                        file_count="multiple",
+                        interactive=False
+                    )
 
-            gr.HTML('<p class="panel-label">Current User</p>')
-            user_dd = gr.Dropdown(choices=USERS, value="guest", label="", interactive=True)
-            gr.HTML("""
-            <div class="access-guide">
-                <b>self</b> &mdash; Access to all personal & public files<br>
-                <b>study_partner</b> &mdash; Access to study notes & public files<br>
-                <b>guest</b> &mdash; Access to public files only (e.g. Alice in Wonderland summary)<br>
-                <div class="tip">
-                    Switch users and ask the same question (e.g. "What did I write in my journal?") to see how access control works.
-                </div>
-            </div>
-            """)
+                with gr.Tab("📤 Upload New PDF"):
+                    gr.HTML("""
+                    <div style="margin-bottom: 8px; font-size: 0.8em; line-height: 1.3; color: #475569; background-color: #f8fafc; padding: 6px; border: 1px solid #e2e8f0; border-radius: 4px;">
+                        <b>Need test files?</b> Download online PDFs:
+                        <ul style="margin: 2px 0 0 12px; padding: 0;">
+                            <li><a href="https://bitcoin.org/bitcoin.pdf" target="_blank" style="color: #ea580c; text-decoration: underline;">Bitcoin Whitepaper</a></li>
+                            <li><a href="https://www.gutenberg.org/files/1661/1661-pdf.pdf" target="_blank" style="color: #ea580c; text-decoration: underline;">Sherlock Holmes</a></li>
+                        </ul>
+                    </div>
+                    """)
+                    pdf_file   = gr.File(label="PDF file", file_types=[".pdf"])
+                    source_in  = gr.Textbox(label="Document name", placeholder="e.g. Textbook")
+                    users_in   = gr.Textbox(
+                        label="Allowed users (comma-separated)",
+                        placeholder="self, study_partner",
+                    )
+                    upload_btn = gr.Button("Index document", variant="primary", size="sm")
+                    upload_out = gr.Textbox(label="Status", interactive=False, lines=2)
 
-            gr.HTML('<p class="panel-label">Corpus</p>')
-            stats_box = gr.Textbox(
-                value=corpus_stats(TENANT),
-                label="", interactive=False, lines=7,
-            )
-            refresh_btn = gr.Button("Refresh", size="sm")
+            # Wiring Left Column Actions
             refresh_btn.click(fn=lambda: corpus_stats(TENANT), outputs=[stats_box])
-
-            gr.HTML('<p class="panel-label">Download Sample Files</p>')
-            gr.HTML("""
-            <div style="margin-bottom: 8px; font-size: 0.82em; color: #475569;">
-                Download the local PDFs (pre-loaded in your cabinet) to inspect or test indexing:
-            </div>
-            """)
-            gr.File(
-                value=[
-                    "sample_files/My_Personal_Journal.pdf",
-                    "sample_files/Biology_Group_Project.pdf",
-                    "sample_files/Alice_in_Wonderland_Summary.pdf"
-                ],
-                label="Local Sample PDFs",
-                file_count="multiple",
-                interactive=False
-            )
-
-            gr.HTML('<p class="panel-label">Upload document</p>')
-            gr.HTML("""
-            <div style="margin-bottom: 10px; font-size: 0.85em; line-height: 1.4; color: #475569; background-color: #f8fafc; padding: 8px; border: 1px solid #e2e8f0; border-radius: 6px;">
-                <b>Need external files?</b> Download online PDFs to test:
-                <ul style="margin: 4px 0 0 16px; padding: 0;">
-                    <li><a href="https://bitcoin.org/bitcoin.pdf" target="_blank" style="color: #ea580c; font-weight: 500; text-decoration: underline;">Bitcoin Whitepaper PDF</a></li>
-                    <li><a href="https://www.gutenberg.org/files/1661/1661-pdf.pdf" target="_blank" style="color: #ea580c; font-weight: 500; text-decoration: underline;">Sherlock Holmes PDF</a></li>
-                </ul>
-            </div>
-            """)
-            pdf_file   = gr.File(label="PDF file", file_types=[".pdf"])
-            source_in  = gr.Textbox(label="Document name", placeholder="e.g. Study Guide / Textbook")
-            users_in   = gr.Textbox(
-                label="Allowed users (comma-separated, empty = all)",
-                placeholder="self, study_partner",
-            )
-            upload_btn = gr.Button("Index document", variant="primary", size="sm")
-            upload_out = gr.Textbox(label="Status", interactive=False, lines=2)
-
             upload_btn.click(
                 fn=upload_pdf,
                 inputs=[pdf_file, source_in, tenant_state, users_in],
                 outputs=[upload_out],
             )
 
-        # MAIN CHAT
+        # RIGHT PANEL: MAIN CHAT & DETAILS
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(
-                height=510,
-                label="",
-                show_label=False,
-                render_markdown=True,
-            )
-            with gr.Row():
-                msg_in   = gr.Textbox(
-                    placeholder="Ask anything about your documents...",
-                    show_label=False, scale=5, lines=1,
-                )
-                send_btn = gr.Button("Send", variant="primary", scale=1, min_width=80)
+            # Compact User Selector and Guide inline above Chatbot
+            with gr.Row(variant="compact"):
+                with gr.Column(scale=1, min_width=90):
+                    gr.HTML("""
+                    <div style="font-size: 12px; font-weight: 600; color: #475569; margin-top: 8px; text-align: right;">
+                        👤 Active User:
+                    </div>
+                    """)
+                with gr.Column(scale=2, min_width=120):
+                    user_dd = gr.Dropdown(
+                        choices=USERS, value="guest", 
+                        show_label=False, 
+                        interactive=True
+                    )
+                with gr.Column(scale=6):
+                    gr.HTML("""
+                    <div style="font-size: 10.5px; line-height: 1.3; color: #475569; padding: 6px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
+                        🔑 <b>Access Matrix:</b> <b>self</b> (all files) | <b>study_partner</b> (shared notes & public) | <b>guest</b> (public only)
+                    </div>
+                    """)
 
-            clear_btn = gr.Button("Clear conversation", size="sm", variant="secondary")
-            clear_btn.click(fn=lambda: [], outputs=[chatbot])
+            with gr.Tabs():
+                with gr.Tab("💬 Cabinet Chatbot"):
+                    chatbot = gr.Chatbot(
+                        height=280,
+                        label="",
+                        show_label=False,
+                        render_markdown=True,
+                    )
+                    with gr.Row():
+                        msg_in   = gr.Textbox(
+                            placeholder="Ask anything about your documents...",
+                            show_label=False, scale=5, lines=1,
+                        )
+                        send_btn = gr.Button("Send", variant="primary", scale=1, min_width=80)
+
+                    clear_btn = gr.Button("Clear conversation", size="sm", variant="secondary")
+
+                with gr.Tab("🔍 Retrieval Logs & Metrics"):
+                    debug_output = gr.Markdown(
+                        value="*Ask a question to see the step-by-step mathematical retrieval details (BM25 vs. Vector scores).* "
+                    )
+
+            # Wiring Right Column Actions
+            clear_btn.click(
+                fn=lambda: ([], "*Ask a question to see the step-by-step mathematical retrieval details (BM25 vs. Vector scores).* "), 
+                outputs=[chatbot, debug_output]
+            )
 
             def _submit(msg, hist, tenant, user):
                 yield from respond(msg, hist, tenant, user)
@@ -742,12 +774,12 @@ with gr.Blocks(title="Smart File Cabinet") as demo:
             send_btn.click(
                 fn=_submit,
                 inputs=[msg_in, chatbot, tenant_state, user_dd],
-                outputs=[msg_in, chatbot],
+                outputs=[msg_in, chatbot, debug_output],
             )
             msg_in.submit(
                 fn=_submit,
                 inputs=[msg_in, chatbot, tenant_state, user_dd],
-                outputs=[msg_in, chatbot],
+                outputs=[msg_in, chatbot, debug_output],
             )
 
 if __name__ == "__main__":
