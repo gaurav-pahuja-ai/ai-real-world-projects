@@ -17,6 +17,7 @@ ai-real-world-projects/
 |   |-- enterprise-search/     Multi-tenant RAG with access control
 |
 |-- mcp/
+|   |-- hello-mcp-server/      Minimal one-tool MCP server, no API keys, start here
 |   |-- github-server/         MCP server that exposes GitHub as tools
 |   |-- postgres-server/       MCP server for safe Postgres querying
 |
@@ -81,6 +82,18 @@ MCP is a standard way to connect AI models to external tools and data sources. T
 
 ---
 
+#### `mcp/hello-mcp-server`
+
+The smallest useful MCP server: one tool (`analyze_text`), no API keys, no external services, under 150 lines. This is the exact code walked through in the "Build Your First MCP Server" lesson. Start here before the GitHub or Postgres servers below.
+
+- **Stack:** Python, MCP SDK
+- **Key concepts:** Tool schema, handler, stdio transport, connecting to Claude Desktop / Cursor
+- **What you learn:** The minimum shape of a working MCP server, so the bigger servers below stop looking like magic
+- **API keys needed:** None
+- **Difficulty:** Beginner
+
+---
+
 #### `mcp/github-server`
 
 An MCP server that gives any MCP-compatible AI assistant access to GitHub operations like listing repos, reading files, and creating issues.
@@ -114,6 +127,7 @@ An autonomous agent that takes a research question, searches the web, reads PDFs
 - **Stack:** Python, OpenAI, Tavily, LangGraph
 - **Key concepts:** ReAct loop, web search and PDF tools, source deduplication, structured output
 - **Difficulty:** Advanced
+- **Eval harness included:** `python eval.py` runs free parser unit checks in ~1 second; `python eval.py --live` also runs the full agent against real tasks and grades the output. This is the harness referenced in the "Evaluating and Testing Agents" lesson.
 
 ---
 
@@ -158,6 +172,7 @@ python main.py
 | rag/bm25-keyword-bot | Google Gemini | Free |
 | rag/semantic-vector-bot | Google Gemini | Free |
 | rag/enterprise-search | Cohere | Free tier available |
+| mcp/hello-mcp-server | None | Free |
 | mcp/github-server | GitHub token | Free |
 | mcp/postgres-server | None (local DB) | Free |
 | agentic/research-agent | OpenAI, Tavily | Paid |
